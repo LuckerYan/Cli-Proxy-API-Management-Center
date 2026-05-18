@@ -19,7 +19,6 @@ import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { usePageTransitionLayer } from '@/components/common/PageTransitionLayer';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { IconFilterAll, IconSearch } from '@/components/ui/icons';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -66,6 +65,7 @@ import {
 import { useAuthStore, useNotificationStore, useQuotaStore, useThemeStore } from '@/stores';
 import { CODEX_CONFIG } from '@/components/quota';
 import { getStatusFromError } from '@/utils/quota';
+import { codexCardsApi } from '@/services/api/codexCards';
 import type { AuthFileItem } from '@/types';
 import styles from './AuthFilesPage.module.scss';
 
@@ -123,6 +123,10 @@ export function AuthFilesPage() {
   const previousSelectionCountRef = useRef(0);
   const selectionCountRef = useRef(0);
   const displayOptionsRef = useRef<HTMLDetailsElement>(null);
+
+  const [codexCardLookup, setCodexCardLookup] = useState<Map<string, string>>(new Map());
+  const codexCardLookupLoadedRef = useRef(false);
+  const codexCardLookupLoadingRef = useRef(false);
 
   const displayOptionsActiveCount =
     (problemOnly ? 1 : 0) +
@@ -475,15 +479,94 @@ export function AuthFilesPage() {
       .filter(Boolean);
   }, [normalizedSearch]);
 
+  // Heuristic: when the user pastes raw card codes into the search box
+  // (multi-line, or a single line whose first non-empty token looks like a
+  // card code), we want to look up the redeemed auth-file each code maps to
+  // and use those file names as the actual search terms. This lets the user
+  // type or paste card codes directly and filter the auth-files list down to
+  // the cards already extracted with those codes.
+  const cardCodeSearchTokens = useMemo<string[] | null>(() => {
+    if (cardBatchTerms) return null;
+    const raw = search.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    if (!raw.trim()) return null;
+    const lines = raw
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return null;
+    const looksLikeCard = (token: string) =>
+      /^(cdx-|card-|cdx_|card_)/i.test(token) ||
+      (/^[A-Z0-9_-]{12,}$/.test(token) && token.includes('-'));
+    const isMultiLine = lines.length > 1;
+    if (!isMultiLine && !looksLikeCard(lines[0])) return null;
+    const tokens = lines
+      .map((line) => {
+        // Honour `email---url` and `?key=` patterns the same way the
+        // extraction page does.
+        const markerIdx = line.indexOf('---');
+        const candidate = markerIdx >= 0 ? line.slice(markerIdx + 3).trim() : line;
+        const keyMatch = candidate.match(/(?:^|[?&#])key=([^&#\s]+)/i);
+        if (keyMatch && keyMatch[1]) {
+          try {
+            return decodeURIComponent(keyMatch[1].replace(/\+/g, ' ')).trim();
+          } catch {
+            return keyMatch[1].trim();
+          }
+        }
+        return candidate;
+      })
+      .map((s) => s.toLowerCase())
+      .filter(Boolean);
+    return tokens.length > 0 ? tokens : null;
+  }, [cardBatchTerms, search]);
+
+  useEffect(() => {
+    if (!cardCodeSearchTokens) return;
+    if (codexCardLookupLoadedRef.current) return;
+    if (codexCardLookupLoadingRef.current) return;
+    codexCardLookupLoadingRef.current = true;
+    void codexCardsApi
+      .list()
+      .then((data) => {
+        const next = new Map<string, string>();
+        for (const card of data.cards) {
+          const code = String(card.code ?? '').trim().toLowerCase();
+          const file = String(card['redeemed_file'] ?? '').trim();
+          if (code && file) next.set(code, file);
+        }
+        setCodexCardLookup(next);
+        codexCardLookupLoadedRef.current = true;
+      })
+      .catch(() => {
+        // Silently ignore: we'll fall back to plain text matching below.
+        codexCardLookupLoadedRef.current = true;
+      })
+      .finally(() => {
+        codexCardLookupLoadingRef.current = false;
+      });
+  }, [cardCodeSearchTokens]);
+
+  const cardCodeSearchFileTerms = useMemo<string[] | null>(() => {
+    if (!cardCodeSearchTokens || cardCodeSearchTokens.length === 0) return null;
+    if (codexCardLookup.size === 0) return null;
+    const terms = new Set<string>();
+    for (const token of cardCodeSearchTokens) {
+      const file = codexCardLookup.get(token);
+      if (file) terms.add(file.toLowerCase());
+    }
+    return terms.size > 0 ? Array.from(terms) : null;
+  }, [cardCodeSearchTokens, codexCardLookup]);
+
   const filtered = useMemo(() => {
     const normalizedTerm = normalizedSearch.toLowerCase();
+    const effectiveCardTerms = cardBatchTerms ?? cardCodeSearchFileTerms;
 
     return filesMatchingStatusFilters.filter((item) => {
       const type = normalizeProviderKey(String(item.type ?? item.provider ?? ''));
       const matchType = normalizedFilter === 'all' || type === normalizedFilter;
       if (!normalizedSearch) return matchType;
-      if (cardBatchTerms) {
-        const matchBatch = cardBatchTerms.some((term) =>
+      if (effectiveCardTerms) {
+        const matchBatch = effectiveCardTerms.some((term) =>
           [
             item.name,
             item['id'],
@@ -509,7 +592,14 @@ export function AuthFilesPage() {
       });
       return matchType && matchSearch;
     });
-  }, [cardBatchTerms, filesMatchingStatusFilters, normalizedFilter, normalizedSearch, wildcardSearch]);
+  }, [
+    cardBatchTerms,
+    cardCodeSearchFileTerms,
+    filesMatchingStatusFilters,
+    normalizedFilter,
+    normalizedSearch,
+    wildcardSearch,
+  ]);
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
@@ -914,16 +1004,20 @@ export function AuthFilesPage() {
               <div className={styles.filterControls}>
                 <div className={`${styles.filterItem} ${styles.filterSearchItem}`}>
                   <label>{t('auth_files.search_label')}</label>
-                  <Input
-                    className={styles.searchInput}
-                    value={search}
-                    onChange={(e) => {
-                      setSearch(e.target.value);
-                      setPage(1);
-                    }}
-                    placeholder={t('auth_files.search_placeholder')}
-                    rightElement={<IconSearch className={styles.searchIcon} size={18} />}
-                  />
+                  <div className={styles.searchInputWrap}>
+                    <textarea
+                      className={styles.searchInput}
+                      value={search}
+                      onChange={(e) => {
+                        setSearch(e.target.value);
+                        setPage(1);
+                      }}
+                      placeholder={t('auth_files.search_placeholder')}
+                      rows={1}
+                      spellCheck={false}
+                    />
+                    <IconSearch className={styles.searchIcon} size={18} />
+                  </div>
                 </div>
                 <div className={styles.filterItem}>
                   <label>{t('auth_files.page_size_label')}</label>

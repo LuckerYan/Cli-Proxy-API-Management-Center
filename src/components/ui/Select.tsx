@@ -50,12 +50,15 @@ const resolveDropdownStyle = (element: HTMLElement): CSSProperties => {
   );
   const spaceBelow = viewportHeight - rect.bottom - VIEWPORT_MARGIN - DROPDOWN_OFFSET;
   const spaceAbove = rect.top - VIEWPORT_MARGIN - DROPDOWN_OFFSET;
-  const direction =
-    spaceBelow >= DROPDOWN_MAX_HEIGHT || spaceBelow >= spaceAbove ? 'down' : 'up';
-  const maxHeight = Math.max(
-    0,
-    Math.min(DROPDOWN_MAX_HEIGHT, direction === 'down' ? spaceBelow : spaceAbove)
-  );
+  // Always anchor the dropdown beneath its trigger. The previous behaviour
+  // flipped the menu above when there wasn't enough room below; users found
+  // that disorienting (especially for the auth-files sort select which can
+  // be near the viewport bottom). Sticking to "open downward" matches the
+  // legacy Go-side monkey-patch and is the convention everywhere else in
+  // this UI.
+  void spaceAbove;
+  const direction: 'down' | 'up' = 'down';
+  const maxHeight = Math.max(0, Math.min(DROPDOWN_MAX_HEIGHT, spaceBelow));
 
   return direction === 'down'
     ? {
