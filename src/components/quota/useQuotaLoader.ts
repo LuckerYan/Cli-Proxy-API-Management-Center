@@ -55,17 +55,60 @@ export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>
           return nextState;
         });
 
-        const results = await Promise.all(
-          targets.map(async (file): Promise<LoadQuotaResult<TData>> => {
+        // Worker pool: limit concurrent fetchQuota calls so a large batch
+        // doesn't fire N parallel HTTP requests and freeze the UI. The cap
+        // is configurable via window.__CPA_QUOTA_REFRESH_CONCURRENCY
+        // (defaults to 10, range 1-targets.length). Each worker writes its
+        // result into the store as soon as it finishes so the UI updates
+        // progressively rather than waiting for the whole batch.
+        const concurrencyOverride =
+          typeof window !== 'undefined'
+            ? Number((window as { __CPA_QUOTA_REFRESH_CONCURRENCY?: number })
+                .__CPA_QUOTA_REFRESH_CONCURRENCY)
+            : NaN;
+        const concurrency = Math.max(
+          1,
+          Math.min(
+            Number.isFinite(concurrencyOverride) ? concurrencyOverride : 10,
+            targets.length
+          )
+        );
+        const results: LoadQuotaResult<TData>[] = new Array(targets.length);
+        let cursor = 0;
+        const runWorker = async () => {
+          for (;;) {
+            const idx = cursor++;
+            if (idx >= targets.length) return;
+            const file = targets[idx];
             try {
               const data = await config.fetchQuota(file, t);
-              return { name: file.name, status: 'success', data };
+              results[idx] = { name: file.name, status: 'success', data };
+              if (requestId === requestIdRef.current) {
+                setQuota((prev) => ({
+                  ...prev,
+                  [file.name]: config.buildSuccessState(data),
+                }));
+              }
             } catch (err: unknown) {
               const message = err instanceof Error ? err.message : t('common.unknown_error');
               const errorStatus = getStatusFromError(err);
-              return { name: file.name, status: 'error', error: message, errorStatus };
+              results[idx] = {
+                name: file.name,
+                status: 'error',
+                error: message,
+                errorStatus,
+              };
+              if (requestId === requestIdRef.current) {
+                setQuota((prev) => ({
+                  ...prev,
+                  [file.name]: config.buildErrorState(message, errorStatus),
+                }));
+              }
             }
-          })
+          }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(concurrency, targets.length) }, () => runWorker())
         );
 
         if (requestId !== requestIdRef.current) return;
@@ -73,6 +116,7 @@ export function useQuotaLoader<TState, TData>(config: QuotaConfig<TState, TData>
         setQuota((prev) => {
           const nextState = { ...prev };
           results.forEach((result) => {
+            if (!result) return;
             if (result.status === 'success') {
               nextState[result.name] = config.buildSuccessState(result.data as TData);
             } else {

@@ -26,7 +26,10 @@ type QuotaSetter<T> = (updater: QuotaUpdater<T>) => void;
 type ViewMode = 'paged' | 'all';
 
 const MAX_ITEMS_PER_PAGE = 25;
-const MAX_SHOW_ALL_THRESHOLD = 30;
+// Effectively disables the "switching to show-all triggers a warning dialog"
+// behaviour. The page-size input below lets users override pagination
+// directly, so a 30-file cap on "show all" is more annoying than useful.
+const MAX_SHOW_ALL_THRESHOLD = 1_000_000;
 
 interface QuotaPaginationState<T> {
   pageSize: number;
@@ -151,15 +154,22 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     };
   }, [showAllAllowed, viewMode]);
 
+  const [pageSizeInput, setPageSizeInput] = useState('');
+
   // Update page size based on view mode and columns
   useEffect(() => {
     if (effectiveViewMode === 'all') {
       setPageSize(Math.max(1, filteredFiles.length));
-    } else {
-      // Paged mode: 3 rows * columns, capped to avoid oversized pages.
-      setPageSize(Math.min(columns * 3, MAX_ITEMS_PER_PAGE));
+      return;
     }
-  }, [effectiveViewMode, columns, filteredFiles.length, setPageSize]);
+    const autoSize = Math.min(columns * 3, MAX_ITEMS_PER_PAGE);
+    const parsed = Number(pageSizeInput);
+    const custom =
+      Number.isFinite(parsed) && parsed > 0
+        ? Math.max(1, Math.min(Math.round(parsed), Math.max(filteredFiles.length, MAX_ITEMS_PER_PAGE)))
+        : null;
+    setPageSize(custom ?? autoSize);
+  }, [effectiveViewMode, columns, filteredFiles.length, pageSizeInput, setPageSize]);
 
   const { quota, loadQuota } = useQuotaLoader(config);
 
@@ -180,11 +190,15 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
     if (!wasLoading) return;
 
     pendingQuotaRefreshRef.current = false;
-    const scope = effectiveViewMode === 'all' ? 'all' : 'page';
-    const targets = effectiveViewMode === 'all' ? filteredFiles : pageItems;
+    // The header "refresh all credentials" button should always refresh every
+    // filtered credential, even when the section is in paged view (otherwise
+    // users would have to flip pages or switch to "show all" just to refresh
+    // the rest). The scope label stays 'all' so the loader treats this as a
+    // batch refresh.
+    const targets = filteredFiles;
     if (targets.length === 0) return;
-    loadQuota(targets, scope, setLoading);
-  }, [loading, effectiveViewMode, filteredFiles, pageItems, loadQuota, setLoading]);
+    loadQuota(targets, 'all', setLoading);
+  }, [loading, filteredFiles, loadQuota, setLoading]);
 
   useEffect(() => {
     if (loading) return;
@@ -255,6 +269,23 @@ export function QuotaSection<TState extends QuotaStatusState, TData>({
       title={titleNode}
       extra={
         <div className={styles.headerActions}>
+          {effectiveViewMode === 'paged' && (
+            <input
+              className={styles.pageSizeInput}
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              value={pageSizeInput || String(pageSize)}
+              title={t('auth_files.page_size_label')}
+              aria-label={t('auth_files.page_size_label')}
+              onFocus={() => setViewMode('paged')}
+              onChange={(e) => {
+                setViewMode('paged');
+                setPageSizeInput(e.target.value.replace(/[^0-9]/g, ''));
+              }}
+            />
+          )}
           <div className={styles.viewModeToggle}>
             <Button
               variant="secondary"

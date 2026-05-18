@@ -80,6 +80,38 @@
   font-size: 14px;
 }
 
+.pageSizeInput {
+  height: 32px;
+  width: 80px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 8px;
+  outline: none;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+
+  &:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 18%, transparent);
+  }
+
+  -moz-appearance: textfield;
+
+  &::-webkit-outer-spin-button,
+  &::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
 .pageSizeSelect {
   padding: 8px 12px;
   border: 1px solid var(--border-color);

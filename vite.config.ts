@@ -35,6 +35,15 @@ function getVersion(): string {
   return 'dev';
 }
 
+// The build process runs Vite twice: once per HTML entry. This avoids
+// cross-entry shared chunks that vite-plugin-singlefile cannot inline.
+// The active entry is selected via the BUILD_ENTRY env var (defaults to
+// "main"). See package.json's `build` script.
+const buildEntry = (process.env.BUILD_ENTRY || 'main').trim();
+const entryHtml =
+  buildEntry === 'codexExtract' ? 'codex-extract.html' : 'index.html';
+const entryOutDir = buildEntry === 'codexExtract' ? 'dist/codexExtract' : 'dist';
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
@@ -64,11 +73,13 @@ export default defineConfig({
   },
   build: {
     target: 'es2020',
-    outDir: 'dist',
+    outDir: entryOutDir,
+    emptyOutDir: true,
     assetsInlineLimit: 100000000,
     chunkSizeWarningLimit: 100000000,
     cssCodeSplit: false,
     rolldownOptions: {
+      input: path.resolve(__dirname, entryHtml),
       output: {
         codeSplitting: false
       }
