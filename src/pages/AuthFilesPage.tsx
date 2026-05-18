@@ -538,6 +538,9 @@ export function AuthFilesPage() {
         codexCardLookupLoadedRef.current = true;
       })
       .catch(() => {
+        codexCardLookupLoadedRef.current = true;
+      })
+      .catch(() => {
         // Silently ignore: we'll fall back to plain text matching below.
         codexCardLookupLoadedRef.current = true;
       })
@@ -1003,7 +1006,16 @@ export function AuthFilesPage() {
             <div className={styles.filterControlsPanel} data-native-patches={CPAMC_NATIVE_AUTHFILES_MARKER}>
               <div className={styles.filterControls}>
                 <div className={`${styles.filterItem} ${styles.filterSearchItem}`}>
-                  <label>{t('auth_files.search_label')}</label>
+                  <label>
+                    {t('auth_files.search_label')}
+                    <span
+                      className={`${styles.searchMatchCount} ${
+                        filtered.length === 0 ? styles.searchMatchCountZero : styles.searchMatchCountActive
+                      }`}
+                    >
+                      {filtered.length}
+                    </span>
+                  </label>
                   <div className={styles.searchInputWrap}>
                     <textarea
                       className={styles.searchInput}

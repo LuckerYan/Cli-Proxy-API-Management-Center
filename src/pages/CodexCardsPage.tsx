@@ -381,9 +381,22 @@ export function CodexCardsPage() {
     try {
       const data = await codexCardsApi.generate(count, generateType);
       const codes = data.codes ?? [];
-      setGenerateOutput(codes.join('\n') || JSON.stringify(data, null, 2));
+      const output = codes.join('\n') || JSON.stringify(data, null, 2);
+      setGenerateOutput(output);
+      let copyMessage = '';
+      if (codes.length > 0) {
+        try {
+          const ok = await copyToClipboard(output);
+          copyMessage = ok
+            ? ` · ${t('codex_cards.generate_copied')}`
+            : ` · ${t('codex_cards.generate_copy_failed')}`;
+        } catch {
+          copyMessage = ` · ${t('codex_cards.generate_copy_failed')}`;
+        }
+      }
       setGenerateStatus({
-        message: t('codex_cards.generate_success', { count: codes.length || count }),
+        message:
+          t('codex_cards.generate_success', { count: codes.length || count }) + copyMessage,
         kind: 'ok',
       });
       await loadCards();

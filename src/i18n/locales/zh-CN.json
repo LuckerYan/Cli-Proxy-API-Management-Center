@@ -137,6 +137,8 @@
     "generating": "生成中…",
     "generate_loading": "正在生成卡密...",
     "generate_success": "已生成 {{count}} 个卡密",
+    "generate_copied": "已自动复制到剪贴板",
+    "generate_copy_failed": "复制到剪贴板失败",
     "waiting_generate": "等待生成...",
     "import_label": "待导入卡密",
     "import_placeholder": "user@example.com---https://mail.lucker.cc.cd/keycode?email=user@example.com&key=et_xxxxxxxxxxxxxxxxxxxxx\nCDX-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
