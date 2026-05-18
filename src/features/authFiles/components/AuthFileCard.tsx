@@ -7,6 +7,7 @@ import {
   IconDownload,
   IconInfo,
   IconModelCluster,
+  IconRefreshCw,
   IconSettings,
   IconTrash2,
 } from '@/components/ui/icons';
@@ -27,6 +28,7 @@ import {
   getAuthFileStatusMessage,
   getTypeColor,
   getTypeLabel,
+  isAuthFileBanned,
   isRuntimeOnlyAuthFile,
   normalizeProviderKey,
   parsePriorityValue,
@@ -35,6 +37,7 @@ import {
 } from '@/features/authFiles/constants';
 import type { AuthFileStatusBarData } from '@/features/authFiles/hooks/useAuthFilesStatusBarCache';
 import { AuthFileQuotaSection } from '@/features/authFiles/components/AuthFileQuotaSection';
+import { useAuthFileQuotaRefresh } from '@/features/authFiles/hooks/useAuthFileQuotaRefresh';
 import styles from '@/pages/AuthFilesPage.module.scss';
 
 const HEALTHY_STATUS_MESSAGES = new Set(['ok', 'healthy', 'ready', 'success', 'available']);
@@ -125,6 +128,9 @@ export function AuthFileCard(props: AuthFileCardProps) {
 
   const priorityValue = parsePriorityValue(file.priority ?? file['priority']);
   const noteValue = typeof file.note === 'string' ? file.note.trim() : '';
+  const isCodex = providerKey === 'codex';
+  const banned = isCodex && isAuthFileBanned(file);
+  const codexQuotaRefresh = useAuthFileQuotaRefresh(file, 'codex');
   const stateLabel = isRuntimeOnly
     ? t('auth_files.type_virtual') || '虚拟认证文件'
     : file.disabled
@@ -189,6 +195,14 @@ export function AuthFileCard(props: AuthFileCardProps) {
                   {typeLabel}
                 </span>
                 <span className={`${styles.stateBadge} ${stateBadgeClass}`}>{stateLabel}</span>
+                {isCodex && (
+                  <span
+                    className={`${styles.stateBadge} ${banned ? styles.stateBadgeWarning : styles.stateBadgeActive}`}
+                    title={t('auth_files.account_status_label')}
+                  >
+                    {banned ? t('auth_files.account_status_banned') : t('auth_files.account_status_active')}
+                  </span>
+                )}
               </div>
               <span className={styles.fileName} title={file.name}>
                 {file.name}
@@ -320,6 +334,25 @@ export function AuthFileCard(props: AuthFileCardProps) {
             </div>
             {!isRuntimeOnly && (
               <div className={styles.statusToggle}>
+                {isCodex && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className={styles.codexQuotaRefreshButton}
+                    onClick={() => void codexQuotaRefresh.refresh({ disableControls })}
+                    disabled={
+                      disableControls || file.disabled || codexQuotaRefresh.status === 'loading'
+                    }
+                    title={t('auth_files.codex_quota_refresh_button')}
+                    aria-label={t('auth_files.codex_quota_refresh_button')}
+                  >
+                    {codexQuotaRefresh.status === 'loading' ? (
+                      <LoadingSpinner size={13} />
+                    ) : (
+                      <IconRefreshCw className={styles.actionIcon} size={13} />
+                    )}
+                  </Button>
+                )}
                 <span className={styles.statusToggleLabel}>
                   {t('auth_files.status_toggle_label')}
                 </span>

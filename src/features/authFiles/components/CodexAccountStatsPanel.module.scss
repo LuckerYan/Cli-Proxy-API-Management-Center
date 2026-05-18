@@ -1,0 +1,215 @@
+.panel {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 76px;
+  margin: 0 0 12px;
+  border: 1px solid var(--border-color);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-secondary) 92%, transparent),
+      color-mix(in srgb, var(--bg-secondary) 72%, transparent)
+    );
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent),
+    0 1px 2px color-mix(in srgb, #000 8%, transparent);
+}
+
+.title {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  margin-right: 4px;
+  padding-left: 12px;
+  display: flex;
+  align-items: center;
+  position: relative;
+  letter-spacing: 0.3px;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 18px;
+    background: linear-gradient(
+      180deg,
+      var(--primary-color),
+      color-mix(in srgb, var(--primary-color) 30%, transparent)
+    );
+    border-radius: 2px;
+  }
+}
+
+.stat {
+  flex: 1 1 132px;
+  min-width: 112px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 86%, transparent);
+  background: color-mix(in srgb, var(--bg-primary) 72%, transparent);
+  border-radius: 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  transition:
+    border-color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--border-color) 100%, transparent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px color-mix(in srgb, #000 22%, transparent);
+  }
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    opacity: 0.9;
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--text-secondary) 60%, transparent),
+      transparent
+    );
+  }
+
+  &.normal::after,
+  &.unextracted::after {
+    background: linear-gradient(
+      90deg,
+      var(--success-color),
+      color-mix(in srgb, var(--success-color) 20%, transparent)
+    );
+  }
+
+  &.banned::after {
+    background: linear-gradient(
+      90deg,
+      var(--error-color),
+      color-mix(in srgb, var(--error-color) 20%, transparent)
+    );
+  }
+
+  &.extracted::after {
+    background: linear-gradient(
+      90deg,
+      var(--primary-color),
+      color-mix(in srgb, var(--primary-color) 20%, transparent)
+    );
+  }
+
+  &.normal .statValue,
+  &.unextracted .statValue {
+    color: var(--success-color);
+  }
+
+  &.banned .statValue {
+    color: var(--error-color);
+  }
+}
+
+.statHead {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px 11px;
+}
+
+.statLabel {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+.statValue {
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.statBreakdown {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--border-color) 55%, transparent);
+}
+
+.chip {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  position: relative;
+  transition: background-color 0.15s ease;
+
+  &:hover {
+    background: color-mix(in srgb, var(--bg-secondary) 90%, transparent);
+  }
+
+  & + .chip {
+    border-left: 1px solid color-mix(in srgb, var(--border-color) 55%, transparent);
+  }
+
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 25%, transparent);
+    flex-shrink: 0;
+  }
+
+  &.plus {
+    color: #ffb547;
+  }
+
+  &.free {
+    color: #7c93b5;
+  }
+}
+
+.chipValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  color: var(--text-primary);
+  font-size: 12px;
+  margin-left: 2px;
+
+  &[data-zero='1'] {
+    color: color-mix(in srgb, var(--text-primary) 40%, transparent);
+  }
+}

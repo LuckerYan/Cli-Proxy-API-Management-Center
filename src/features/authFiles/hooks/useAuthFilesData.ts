@@ -218,21 +218,31 @@ export function useAuthFilesData(): UseAuthFilesDataResult {
       try {
         const result = await authFilesApi.uploadFiles(validFiles);
         const successCount = result.uploaded;
+        const duplicateCount = Array.isArray(result.duplicates) ? result.duplicates.length : 0;
+        const failedCount = Array.isArray(result.failed) ? result.failed.length : 0;
 
-        if (successCount > 0) {
-          const suffix = validFiles.length > 1 ? ` (${successCount}/${validFiles.length})` : '';
-          showNotification(
-            `${t('auth_files.upload_success')}${suffix}`,
-            result.failed.length ? 'warning' : 'success'
-          );
+        if (successCount > 0 || duplicateCount > 0 || failedCount > 0) {
+          const summary = t('auth_files.upload_summary_suffix', {
+            ok: successCount,
+            duplicate: duplicateCount,
+            fail: failedCount,
+            total: validFiles.length,
+          });
+          let message = `${t('auth_files.upload_success')} ${summary}`;
+          if (failedCount > 0) {
+            const details = result.failed
+              .map((item) => `${item.name}: ${item.error}`)
+              .join('; ');
+            message += `; ${t('notification.upload_failed')}: ${details}`;
+          }
+          const variant =
+            failedCount > 0
+              ? 'warning'
+              : duplicateCount > 0 && successCount === 0
+                ? 'warning'
+                : 'success';
+          showNotification(message, variant);
           await loadFiles();
-        }
-
-        if (result.failed.length > 0) {
-          const details = result.failed
-            .map((item) => `${item.name}: ${item.error}`)
-            .join('; ');
-          showNotification(`${t('notification.upload_failed')}: ${details}`, 'error');
         }
       } catch (err: unknown) {
         const errorMessage = err instanceof Error ? err.message : 'Unknown error';

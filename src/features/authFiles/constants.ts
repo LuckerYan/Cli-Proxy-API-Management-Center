@@ -35,7 +35,7 @@ export const QUOTA_PROVIDER_TYPES = new Set<QuotaProviderType>([
 ]);
 
 export const MIN_CARD_PAGE_SIZE = 3;
-export const MAX_CARD_PAGE_SIZE = 30;
+export const MAX_CARD_PAGE_SIZE = 1000;
 export const AUTH_FILE_REFRESH_WARNING_MS = 24 * 60 * 60 * 1000;
 
 export const INTEGER_STRING_PATTERN = /^[+-]?\d+$/;
@@ -151,6 +151,54 @@ export const getAuthFileStatusMessage = (file: AuthFileItem): string => {
 
 export const hasAuthFileStatusMessage = (file: AuthFileItem): boolean =>
   getAuthFileStatusMessage(file).length > 0;
+
+const codexAccountStatusOf = (file: AuthFileItem): string =>
+  String(file['account_status'] ?? file['accountStatus'] ?? file.status ?? '')
+    .trim()
+    .toLowerCase();
+
+export const isAuthFileBanned = (file: AuthFileItem): boolean =>
+  codexAccountStatusOf(file) === 'banned';
+
+export const hasAuthFileProblem = (file: AuthFileItem): boolean =>
+  hasAuthFileStatusMessage(file) || isAuthFileBanned(file);
+
+const isCodexFile = (file: AuthFileItem): boolean =>
+  String(file.type ?? file.provider ?? '')
+    .trim()
+    .toLowerCase() === 'codex';
+
+export const isCodexExtracted = (file: AuthFileItem): boolean =>
+  isCodexFile(file) &&
+  !!(file['codex_redeemed'] || file['codex_extracted'] || file['redeemed']);
+
+export const isCodexUnextracted = (file: AuthFileItem): boolean =>
+  isCodexFile(file) && !isCodexExtracted(file) && !isAuthFileBanned(file);
+
+const codexPlanTypeOf = (file: AuthFileItem): string => {
+  if (!file) return '';
+  const token = file['id_token'] ?? file['idToken'];
+  let plan = '';
+  if (token && typeof token === 'object') {
+    const obj = token as Record<string, unknown>;
+    plan = String(obj['plan_type'] ?? obj['planType'] ?? obj['chatgpt_plan_type'] ?? '');
+  }
+  if (!plan) {
+    plan = String(file['plan_type'] ?? file['planType'] ?? file['chatgpt_plan_type'] ?? '');
+  }
+  return plan.trim().toLowerCase();
+};
+
+export const codexEffectivePlan = (file: AuthFileItem): 'plus' | 'free' => {
+  const plan = codexPlanTypeOf(file);
+  return !plan || plan === 'free' ? 'free' : 'plus';
+};
+
+export const isCodexPlus = (file: AuthFileItem): boolean =>
+  isCodexFile(file) && codexEffectivePlan(file) === 'plus';
+
+export const isCodexFree = (file: AuthFileItem): boolean =>
+  isCodexFile(file) && codexEffectivePlan(file) === 'free';
 
 export const getTypeLabel = (t: TFunction, type: string): string => {
   const providerKey = normalizeProviderKey(type);

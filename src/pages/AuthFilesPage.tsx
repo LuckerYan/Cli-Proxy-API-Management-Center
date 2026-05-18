@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useNavigate } from 'react-router-dom';
 import { animate } from 'motion/mini';
 import type { AnimationPlaybackControlsWithThen } from 'motion-dom';
@@ -32,7 +33,11 @@ import {
   getAuthFileIcon,
   getTypeColor,
   getTypeLabel,
-  hasAuthFileStatusMessage,
+  hasAuthFileProblem,
+  isCodexExtracted,
+  isCodexFree,
+  isCodexPlus,
+  isCodexUnextracted,
   isRuntimeOnlyAuthFile,
   normalizeProviderKey,
   parsePriorityValue,
@@ -42,6 +47,7 @@ import {
 import { AuthFileCard } from '@/features/authFiles/components/AuthFileCard';
 import { AuthFileModelsModal } from '@/features/authFiles/components/AuthFileModelsModal';
 import { AuthFilesPrefixProxyEditorModal } from '@/features/authFiles/components/AuthFilesPrefixProxyEditorModal';
+import { CodexAccountStatsPanel } from '@/features/authFiles/components/CodexAccountStatsPanel';
 import { OAuthExcludedCard } from '@/features/authFiles/components/OAuthExcludedCard';
 import { OAuthModelAliasCard } from '@/features/authFiles/components/OAuthModelAliasCard';
 import { useAuthFilesData } from '@/features/authFiles/hooks/useAuthFilesData';
@@ -57,7 +63,10 @@ import {
   writePersistedAuthFilesCompactMode,
   type AuthFilesSortMode,
 } from '@/features/authFiles/uiState';
-import { useAuthStore, useNotificationStore, useThemeStore } from '@/stores';
+import { useAuthStore, useNotificationStore, useQuotaStore, useThemeStore } from '@/stores';
+import { CODEX_CONFIG } from '@/components/quota';
+import { getStatusFromError } from '@/utils/quota';
+import type { AuthFileItem } from '@/types';
 import styles from './AuthFilesPage.module.scss';
 
 const easePower3Out = (progress: number) => 1 - (1 - progress) ** 4;
@@ -76,6 +85,11 @@ const buildWildcardSearch = (value: string): RegExp | null => {
   return new RegExp(pattern, 'i');
 };
 
+// Marker for the Go-side asset injector to detect that this build already
+// ships the auth-files patches natively and skip its legacy monkey-patches.
+// Keep this string stable: "__CPAMC_NATIVE_AUTHFILES_V1__"
+const CPAMC_NATIVE_AUTHFILES_MARKER = '__CPAMC_NATIVE_AUTHFILES_V1__';
+
 export function AuthFilesPage() {
   const { t } = useTranslation();
   const showNotification = useNotificationStore((state) => state.showNotification);
@@ -88,6 +102,10 @@ export function AuthFilesPage() {
   const [filter, setFilter] = useState<'all' | string>('all');
   const [problemOnly, setProblemOnly] = useState(false);
   const [disabledOnly, setDisabledOnly] = useState(false);
+  const [extractedOnly, setExtractedOnly] = useState(false);
+  const [unextractedOnly, setUnextractedOnly] = useState(false);
+  const [plusOnly, setPlusOnly] = useState(false);
+  const [freeOnly, setFreeOnly] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -104,6 +122,27 @@ export function AuthFilesPage() {
   const batchActionAnimationRef = useRef<AnimationPlaybackControlsWithThen | null>(null);
   const previousSelectionCountRef = useRef(0);
   const selectionCountRef = useRef(0);
+  const displayOptionsRef = useRef<HTMLDetailsElement>(null);
+
+  const displayOptionsActiveCount =
+    (problemOnly ? 1 : 0) +
+    (disabledOnly ? 1 : 0) +
+    (extractedOnly ? 1 : 0) +
+    (unextractedOnly ? 1 : 0) +
+    (plusOnly ? 1 : 0) +
+    (freeOnly ? 1 : 0) +
+    (compactMode ? 1 : 0);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const el = displayOptionsRef.current;
+      if (!el || !el.open) return;
+      if (event.target instanceof Node && el.contains(event.target)) return;
+      el.open = false;
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, []);
 
   const {
     files,
@@ -202,6 +241,18 @@ export function AuthFilesPage() {
       if (typeof persisted.disabledOnly === 'boolean') {
         setDisabledOnly(persisted.disabledOnly);
       }
+      if (typeof persisted.extractedOnly === 'boolean') {
+        setExtractedOnly(persisted.extractedOnly);
+      }
+      if (typeof persisted.unextractedOnly === 'boolean') {
+        setUnextractedOnly(persisted.unextractedOnly);
+      }
+      if (typeof persisted.plusOnly === 'boolean') {
+        setPlusOnly(persisted.plusOnly);
+      }
+      if (typeof persisted.freeOnly === 'boolean') {
+        setFreeOnly(persisted.freeOnly);
+      }
       if (
         typeof persistedCompactMode !== 'boolean' &&
         typeof persisted.compactMode === 'boolean'
@@ -245,6 +296,10 @@ export function AuthFilesPage() {
       filter,
       problemOnly,
       disabledOnly,
+      extractedOnly,
+      unextractedOnly,
+      plusOnly,
+      freeOnly,
       compactMode,
       search,
       page,
@@ -257,14 +312,18 @@ export function AuthFilesPage() {
   }, [
     compactMode,
     disabledOnly,
+    extractedOnly,
     filter,
+    freeOnly,
     page,
     pageSize,
     pageSizeByMode,
+    plusOnly,
     problemOnly,
     search,
     sortMode,
     uiStateHydrated,
+    unextractedOnly,
   ]);
 
   useEffect(() => {
@@ -346,6 +405,15 @@ export function AuthFilesPage() {
     isCurrentLayer ? 240_000 : null
   );
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handler = () => {
+      void loadFiles().catch(() => {});
+    };
+    window.addEventListener('cli-proxy-auth-files-updated', handler);
+    return () => window.removeEventListener('cli-proxy-auth-files-updated', handler);
+  }, [loadFiles]);
+
   const existingTypes = useMemo(() => {
     const types = new Set<string>(['all']);
     files.forEach((file) => {
@@ -358,11 +426,15 @@ export function AuthFilesPage() {
   const filesMatchingStatusFilters = useMemo(
     () =>
       files.filter((file) => {
-        if (problemOnly && !hasAuthFileStatusMessage(file)) return false;
+        if (problemOnly && !hasAuthFileProblem(file)) return false;
         if (disabledOnly && file.disabled !== true) return false;
+        if (extractedOnly && !isCodexExtracted(file)) return false;
+        if (unextractedOnly && !isCodexUnextracted(file)) return false;
+        if (plusOnly && !isCodexPlus(file)) return false;
+        if (freeOnly && !isCodexFree(file)) return false;
         return true;
       }),
-    [disabledOnly, files, problemOnly]
+    [disabledOnly, extractedOnly, files, freeOnly, plusOnly, problemOnly, unextractedOnly]
   );
 
   const sortOptions = useMemo(
@@ -387,23 +459,57 @@ export function AuthFilesPage() {
   const normalizedSearch = search.trim();
   const wildcardSearch = useMemo(() => buildWildcardSearch(normalizedSearch), [normalizedSearch]);
 
+  const cardBatchTerms = useMemo(() => {
+    const marker = '__codex_card_batch__=';
+    if (!normalizedSearch.startsWith(marker)) return null;
+    return normalizedSearch
+      .slice(marker.length)
+      .split('|||')
+      .map((part) => {
+        try {
+          return decodeURIComponent(part).trim().toLowerCase();
+        } catch {
+          return part.trim().toLowerCase();
+        }
+      })
+      .filter(Boolean);
+  }, [normalizedSearch]);
+
   const filtered = useMemo(() => {
     const normalizedTerm = normalizedSearch.toLowerCase();
 
     return filesMatchingStatusFilters.filter((item) => {
       const type = normalizeProviderKey(String(item.type ?? item.provider ?? ''));
       const matchType = normalizedFilter === 'all' || type === normalizedFilter;
-      const matchSearch =
-        !normalizedSearch ||
-        [item.name, item.type, item.provider].some((value) => {
-          const content = (value || '').toString();
-          return wildcardSearch
-            ? wildcardSearch.test(content)
-            : content.toLowerCase().includes(normalizedTerm);
-        });
+      if (!normalizedSearch) return matchType;
+      if (cardBatchTerms) {
+        const matchBatch = cardBatchTerms.some((term) =>
+          [
+            item.name,
+            item['id'],
+            item['path'],
+            item['email'],
+            item['account'],
+            item['file_name'],
+            item['fileName'],
+            item['file_path'],
+            item['filePath'],
+          ].some((value) => {
+            const content = String(value || '').toLowerCase();
+            return !!content && (content === term || content.includes(term) || term.includes(content));
+          })
+        );
+        return matchType && matchBatch;
+      }
+      const matchSearch = [item.name, item.type, item.provider].some((value) => {
+        const content = (value || '').toString();
+        return wildcardSearch
+          ? wildcardSearch.test(content)
+          : content.toLowerCase().includes(normalizedTerm);
+      });
       return matchType && matchSearch;
     });
-  }, [filesMatchingStatusFilters, normalizedFilter, normalizedSearch, wildcardSearch]);
+  }, [cardBatchTerms, filesMatchingStatusFilters, normalizedFilter, normalizedSearch, wildcardSearch]);
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
@@ -449,6 +555,94 @@ export function AuthFilesPage() {
     selectedNames.length === 0 ||
     batchStatusUpdating ||
     selectedHasStatusUpdating;
+
+  const setCodexQuota = useQuotaStore((state) => state.setCodexQuota) as unknown as (
+    updater: (prev: Record<string, unknown>) => Record<string, unknown>
+  ) => void;
+
+  const batchRefreshQuota = useCallback(
+    async (names: string[]) => {
+      const targetSet = new Set(names);
+      const targets = files.filter(
+        (file) =>
+          targetSet.has(file.name) &&
+          String(file.type ?? file.provider ?? '')
+            .trim()
+            .toLowerCase() === 'codex' &&
+          !isRuntimeOnlyAuthFile(file) &&
+          file.disabled !== true
+      );
+      if (targets.length === 0) {
+        showNotification(t('auth_files.batch_refresh_quota_empty'), 'warning');
+        return;
+      }
+      const config = CODEX_CONFIG as unknown as {
+        fetchQuota: (file: AuthFileItem, t: TFunction) => Promise<unknown>;
+        buildLoadingState: () => unknown;
+        buildSuccessState: (data: unknown) => unknown;
+        buildErrorState: (message: string, status?: number) => unknown;
+      };
+      const concurrencyOverride = Number(
+        (window as { __CPA_QUOTA_REFRESH_CONCURRENCY?: number }).__CPA_QUOTA_REFRESH_CONCURRENCY
+      );
+      const concurrency = Math.max(
+        1,
+        Math.min(10, Math.floor(Number.isFinite(concurrencyOverride) ? concurrencyOverride : 10))
+      );
+      let cursor = 0;
+      let succeeded = 0;
+      let failed = 0;
+      setCodexQuota((prev) => {
+        const next = { ...prev };
+        for (const file of targets) {
+          next[file.name] = config.buildLoadingState();
+        }
+        return next;
+      });
+      const worker = async () => {
+        for (;;) {
+          const idx = cursor++;
+          if (idx >= targets.length) return;
+          const file = targets[idx];
+          try {
+            const data = await config.fetchQuota(file, t);
+            succeeded++;
+            setCodexQuota((prev) => ({ ...prev, [file.name]: config.buildSuccessState(data) }));
+          } catch (err: unknown) {
+            failed++;
+            const message = err instanceof Error ? err.message : t('common.unknown_error');
+            const status = getStatusFromError(err);
+            setCodexQuota((prev) => ({
+              ...prev,
+              [file.name]: config.buildErrorState(message, status),
+            }));
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(concurrency, targets.length) }, () => worker())
+      );
+      if (failed === 0) {
+        showNotification(
+          t('auth_files.batch_refresh_quota_success', { count: succeeded }),
+          'success'
+        );
+      } else {
+        showNotification(
+          t('auth_files.batch_refresh_quota_partial', { ok: succeeded, fail: failed }),
+          'warning'
+        );
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('cli-proxy-auth-files-updated', {
+            detail: { source: 'selected-quota-refresh', type: 'codex', scope: 'selected' },
+          })
+        );
+      }
+    },
+    [files, setCodexQuota, showNotification, t]
+  );
 
   const copyTextWithNotification = useCallback(
     async (text: string) => {
@@ -715,7 +909,8 @@ export function AuthFilesPage() {
           {renderFilterTags()}
 
           <div className={styles.filterContent}>
-            <div className={styles.filterControlsPanel}>
+            <CodexAccountStatsPanel files={files} />
+            <div className={styles.filterControlsPanel} data-native-patches={CPAMC_NATIVE_AUTHFILES_MARKER}>
               <div className={styles.filterControls}>
                 <div className={`${styles.filterItem} ${styles.filterSearchItem}`}>
                   <label>{t('auth_files.search_label')}</label>
@@ -761,50 +956,129 @@ export function AuthFilesPage() {
                 </div>
                 <div className={`${styles.filterItem} ${styles.filterToggleItem}`}>
                   <label>{t('auth_files.display_options_label')}</label>
-                  <div className={styles.filterToggleGroup}>
-                    <div className={styles.filterToggleCard}>
-                      <ToggleSwitch
-                        checked={problemOnly}
-                        onChange={(value) => {
-                          setProblemOnly(value);
-                          setPage(1);
-                        }}
-                        ariaLabel={t('auth_files.problem_filter_only')}
-                        label={
-                          <span className={styles.filterToggleLabel}>
-                            {t('auth_files.problem_filter_only')}
-                          </span>
-                        }
-                      />
+                  <details className={styles.displayOptionsMenu} ref={displayOptionsRef}>
+                    <summary className={styles.displayOptionsTrigger}>
+                      <span>{t('auth_files.display_options_label')}</span>
+                      {displayOptionsActiveCount > 0 && (
+                        <span className={styles.displayOptionsCount}>
+                          {displayOptionsActiveCount}
+                        </span>
+                      )}
+                      <span className={styles.displayOptionsChevron} aria-hidden="true">
+                        {'\u2304'}
+                      </span>
+                    </summary>
+                    <div
+                      className={`${styles.filterToggleGroup} ${styles.displayOptionsList}`}
+                    >
+                      <div className={styles.filterToggleCard}>
+                        <ToggleSwitch
+                          checked={problemOnly}
+                          onChange={(value) => {
+                            setProblemOnly(value);
+                            setPage(1);
+                          }}
+                          ariaLabel={t('auth_files.problem_filter_only')}
+                          label={
+                            <span className={styles.filterToggleLabel}>
+                              {t('auth_files.problem_filter_short')}
+                            </span>
+                          }
+                        />
+                      </div>
+                      <div className={styles.filterToggleCard}>
+                        <ToggleSwitch
+                          checked={disabledOnly}
+                          onChange={(value) => {
+                            setDisabledOnly(value);
+                            setPage(1);
+                          }}
+                          ariaLabel={t('auth_files.disabled_filter_only')}
+                          label={
+                            <span className={styles.filterToggleLabel}>
+                              {t('auth_files.disabled_filter_short')}
+                            </span>
+                          }
+                        />
+                      </div>
+                      <div className={styles.filterToggleCard}>
+                        <ToggleSwitch
+                          checked={unextractedOnly}
+                          onChange={(value) => {
+                            setUnextractedOnly(value);
+                            if (value) setExtractedOnly(false);
+                            setPage(1);
+                          }}
+                          ariaLabel={t('auth_files.unextracted_filter_only')}
+                          label={
+                            <span className={styles.filterToggleLabel}>
+                              {t('auth_files.unextracted_filter_only')}
+                            </span>
+                          }
+                        />
+                      </div>
+                      <div className={styles.filterToggleCard}>
+                        <ToggleSwitch
+                          checked={extractedOnly}
+                          onChange={(value) => {
+                            setExtractedOnly(value);
+                            if (value) setUnextractedOnly(false);
+                            setPage(1);
+                          }}
+                          ariaLabel={t('auth_files.extracted_filter_only')}
+                          label={
+                            <span className={styles.filterToggleLabel}>
+                              {t('auth_files.extracted_filter_only')}
+                            </span>
+                          }
+                        />
+                      </div>
+                      <div className={styles.filterToggleCard}>
+                        <ToggleSwitch
+                          checked={plusOnly}
+                          onChange={(value) => {
+                            setPlusOnly(value);
+                            if (value) setFreeOnly(false);
+                            setPage(1);
+                          }}
+                          ariaLabel={t('auth_files.plus_filter_only')}
+                          label={
+                            <span className={styles.filterToggleLabel}>
+                              {t('auth_files.plus_filter_only')}
+                            </span>
+                          }
+                        />
+                      </div>
+                      <div className={styles.filterToggleCard}>
+                        <ToggleSwitch
+                          checked={freeOnly}
+                          onChange={(value) => {
+                            setFreeOnly(value);
+                            if (value) setPlusOnly(false);
+                            setPage(1);
+                          }}
+                          ariaLabel={t('auth_files.free_filter_only')}
+                          label={
+                            <span className={styles.filterToggleLabel}>
+                              {t('auth_files.free_filter_only')}
+                            </span>
+                          }
+                        />
+                      </div>
+                      <div className={styles.filterToggleCard}>
+                        <ToggleSwitch
+                          checked={compactMode}
+                          onChange={(value) => setCompactMode(value)}
+                          ariaLabel={t('auth_files.compact_mode_label')}
+                          label={
+                            <span className={styles.filterToggleLabel}>
+                              {t('auth_files.compact_mode_label')}
+                            </span>
+                          }
+                        />
+                      </div>
                     </div>
-                    <div className={styles.filterToggleCard}>
-                      <ToggleSwitch
-                        checked={disabledOnly}
-                        onChange={(value) => {
-                          setDisabledOnly(value);
-                          setPage(1);
-                        }}
-                        ariaLabel={t('auth_files.disabled_filter_only')}
-                        label={
-                          <span className={styles.filterToggleLabel}>
-                            {t('auth_files.disabled_filter_only')}
-                          </span>
-                        }
-                      />
-                    </div>
-                    <div className={styles.filterToggleCard}>
-                      <ToggleSwitch
-                        checked={compactMode}
-                        onChange={(value) => setCompactMode(value)}
-                        ariaLabel={t('auth_files.compact_mode_label')}
-                        label={
-                          <span className={styles.filterToggleLabel}>
-                            {t('auth_files.compact_mode_label')}
-                          </span>
-                        }
-                      />
-                    </div>
-                  </div>
+                  </details>
                 </div>
               </div>
             </div>
@@ -960,6 +1234,14 @@ export function AuthFilesPage() {
                   </Button>
                 </div>
                 <div className={styles.batchActionRight}>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => void batchRefreshQuota(selectedNames)}
+                    disabled={disableControls || selectedNames.length === 0}
+                  >
+                    {t('auth_files.codex_quota_refresh_button')}
+                  </Button>
                   <Button
                     variant="secondary"
                     size="sm"

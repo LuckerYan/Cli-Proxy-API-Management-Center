@@ -22,6 +22,7 @@ type AuthFileBatchUploadResponse = {
   status?: string;
   uploaded?: number;
   files?: unknown;
+  duplicates?: unknown;
   failed?: unknown;
 };
 type AuthFileBatchDeleteResponse = {
@@ -34,6 +35,7 @@ type AuthFileBatchUploadResult = {
   status: string;
   uploaded: number;
   files: string[];
+  duplicates: string[];
   failed: AuthFileBatchFailure[];
 };
 type AuthFileBatchDeleteResult = {
@@ -110,6 +112,17 @@ const normalizeBatchUploadResponse = (
 ): AuthFileBatchUploadResult => {
   const failed = normalizeBatchFailures(payload?.failed);
   const uploadedFilesFromPayload = normalizeBatchFileNames(payload?.files);
+  const duplicates = Array.isArray(payload?.duplicates)
+    ? (payload.duplicates as unknown[])
+        .map((entry) => {
+          if (typeof entry === 'string') return entry.trim();
+          if (entry && typeof entry === 'object' && 'name' in entry) {
+            return String((entry as { name?: unknown }).name ?? '').trim();
+          }
+          return '';
+        })
+        .filter(Boolean)
+    : [];
   const uploaded =
     typeof payload?.uploaded === 'number'
       ? payload.uploaded
@@ -132,9 +145,17 @@ const normalizeBatchUploadResponse = (
   }
 
   return {
-    status: typeof payload?.status === 'string' ? payload.status : failed.length > 0 ? 'partial' : 'ok',
+    status:
+      typeof payload?.status === 'string'
+        ? payload.status
+        : failed.length > 0
+          ? 'partial'
+          : duplicates.length > 0 && uploaded === 0
+            ? 'duplicate'
+            : 'ok',
     uploaded,
     files: uploadedFiles,
+    duplicates,
     failed,
   };
 };
@@ -414,7 +435,7 @@ export const authFilesApi = {
   uploadFiles: async (files: File[]): Promise<AuthFileBatchUploadResult> => {
     const requestedNames = files.map((file) => file.name);
     if (requestedNames.length === 0) {
-      return { status: 'ok', uploaded: 0, files: [], failed: [] };
+      return { status: 'ok', uploaded: 0, files: [], duplicates: [], failed: [] };
     }
 
     const formData = new FormData();
